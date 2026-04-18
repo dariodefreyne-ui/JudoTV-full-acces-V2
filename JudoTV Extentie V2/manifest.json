@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "JudoTV Enhanced",
+  "version": "2.0",
+  "description": "Ad removal, auto-reconnect en spelercontroles voor JudoTV",
+  "permissions": ["scripting", "activeTab", "storage"],
+  "host_permissions": ["https://judotv.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://judotv.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "32": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

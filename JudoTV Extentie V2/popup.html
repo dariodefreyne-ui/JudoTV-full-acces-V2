@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JudoTV Enhanced</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+
+    <header class="popup__header">
+      <img src="icon.png" alt="JudoTV" class="popup__logo">
+      <div>
+        <h1 class="popup__title">JudoTV Enhanced</h1>
+        <span id="stream-status" class="popup__status">Laden...</span>
+      </div>
+    </header>
+
+    <section class="popup__section">
+      <p class="popup__label">Terugspoelen</p>
+      <div class="popup__btnrow">
+        <button class="popup__btn" data-action="rewind" data-seconds="5">⏪ 5s</button>
+        <button class="popup__btn" data-action="rewind" data-seconds="10">⏪ 10s</button>
+        <button class="popup__btn" data-action="rewind" data-seconds="30">⏪ 30s</button>
+      </div>
+    </section>
+
+    <section class="popup__section">
+      <p class="popup__label">Speler</p>
+      <div class="popup__btnrow">
+        <button class="popup__btn popup__btn--accent" data-action="goLive">⏩ Naar LIVE</button>
+        <button class="popup__btn" data-action="fullscreen">⛶ Volledig</button>
+      </div>
+    </section>
+
+    <section class="popup__section popup__section--toggle">
+      <span class="popup__label">Auto-herverbinden bij uitval</span>
+      <label class="toggle">
+        <input type="checkbox" id="auto-reconnect-toggle" checked>
+        <span class="toggle__slider"></span>
+      </label>
+    </section>
+
+    <footer class="popup__footer">
+      v2.0 · <a href="https://judotv.com" target="_blank">judotv.com</a>
+    </footer>
+
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
