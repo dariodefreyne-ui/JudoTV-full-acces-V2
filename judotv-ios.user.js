@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JudoTV Enhanced (iOS)
 // @namespace    https://judotv.com
-// @version      2.0
+// @version      2.1
 // @description  Advertenties verwijderen, videobediening en auto-reconnect op judotv.com
 // @author       JudoTV Enhanced
 // @match        https://judotv.com/*
@@ -125,15 +125,16 @@
     '[id*="ad-container"]',
     '[id*="sponsor-overlay"]',
     'div[style*="z-index: 9999"]:not(#judotv-ext-v2-controls)',
-    'iframe:not([src*="judotv.com"]):not([src*="vimeo"]):not([src*="youtube"])',
   ];
 
   // ─── State ────────────────────────────────────────────────────────────────
-  let reconnectCount = 0;
-  let stallTimer     = null;
-  let hideTimer      = null;
-  let observerActive = false;
-  let rafPending     = false;
+  let reconnectCount       = 0;
+  let stallTimer           = null;
+  let hideTimer            = null;
+  let observer             = null;
+  let rafPending           = false;
+  let boundVideo           = null;
+  let videoEventController = null;
 
   // Auto-reconnect instelling via GM_getValue/GM_setValue (of standaard true)
   let autoReconnect = (typeof GM_getValue !== 'undefined')
@@ -167,6 +168,12 @@
         });
       } catch (_) {}
     });
+    document.querySelectorAll('iframe[src]').forEach(el => {
+      const src = el.getAttribute('src').toLowerCase();
+      if (!src.includes('judotv.com') && !src.includes('vimeo') && !src.includes('youtube')) {
+        el.remove();
+      }
+    });
   }
 
   // ─── Throttled MutationObserver via rAF ──────────────────────────────────
@@ -181,10 +188,9 @@
   }
 
   function startObserver() {
-    if (observerActive) return;
-    const observer = new MutationObserver(onDOMMutation);
+    if (observer) return;
+    observer = new MutationObserver(onDOMMutation);
     observer.observe(document.body, { childList: true, subtree: true });
-    observerActive = true;
   }
 
   // ─── Auto-reconnect ───────────────────────────────────────────────────────
@@ -218,27 +224,33 @@
   }
 
   function bindVideoEvents(video) {
+    if (video === boundVideo) return;
+    if (videoEventController) videoEventController.abort();
+    videoEventController = new AbortController();
+    const { signal } = videoEventController;
+    boundVideo = video;
+
     video.addEventListener('stalled', () => {
       updateStatusBadge('stalled');
       scheduleReconnect(video, 'stalled');
-    });
+    }, { signal });
     video.addEventListener('waiting', () => {
       updateStatusBadge('stalled');
       scheduleReconnect(video, 'waiting');
-    });
+    }, { signal });
     video.addEventListener('error', () => {
       updateStatusBadge('error');
       scheduleReconnect(video, 'error');
-    });
+    }, { signal });
     video.addEventListener('playing', () => {
       clearTimeout(stallTimer);
       reconnectCount = 0;
       updateStatusBadge('live');
-    });
+    }, { signal });
     video.addEventListener('pause', () => {
       clearTimeout(stallTimer);
       updateStatusBadge('paused');
-    });
+    }, { signal });
   }
 
   // ─── Status badge ─────────────────────────────────────────────────────────
@@ -289,6 +301,18 @@
     if (req) req.call(wrapper).catch(() => {});
   }
 
+  function doPiP() {
+    const v = getVideo();
+    if (!v) return;
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    } else {
+      v.requestPictureInPicture().catch(() => {
+        showToast('PiP niet ondersteund door deze browser', 'warn', 2500);
+      });
+    }
+  }
+
   // ─── Controls injectie ────────────────────────────────────────────────────
   function ensureControlsExist() {
     if (document.getElementById(CONTROLS_ID)) return;
@@ -314,11 +338,12 @@
     badge.textContent = '● LIVE';
 
     const btns = [
-      { label: '⏪ 5s',       title: '5 seconden terug',  action: () => doRewind(5)  },
-      { label: '⏪ 10s',      title: '10 seconden terug', action: () => doRewind(10) },
-      { label: '⏪ 30s',      title: '30 seconden terug', action: () => doRewind(30) },
-      { label: '⏩ LIVE',     title: 'Ga naar live',      action: doGoLive           },
-      { label: '⛶ Volledig', title: 'Volledig scherm',   action: doFullscreen       },
+      { label: '⏪ 5s',    title: '5 seconden terug',   action: () => doRewind(5)  },
+      { label: '⏪ 10s',   title: '10 seconden terug',  action: () => doRewind(10) },
+      { label: '⏪ 30s',   title: '30 seconden terug',  action: () => doRewind(30) },
+      { label: '⏩ LIVE',  title: 'Ga naar live',        action: doGoLive           },
+      { label: '⧉ PiP',   title: 'Picture-in-Picture',  action: doPiP              },
+      { label: '⛶ Scherm', title: 'Volledig scherm',    action: doFullscreen       },
     ];
 
     bar.appendChild(badge);
@@ -368,15 +393,24 @@
   // ─── SPA-navigatie opvangen ───────────────────────────────────────────────
   let lastUrl = location.href;
   function checkNavigation() {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      setTimeout(() => {
-        removeAds();
-        ensureControlsExist();
-      }, 1500);
-    }
+    if (location.href === lastUrl) return;
+    lastUrl = location.href;
+    document.getElementById(CONTROLS_ID)?.remove();
+    boundVideo = null;
+    if (videoEventController) { videoEventController.abort(); videoEventController = null; }
+    reconnectCount = 0;
+    clearTimeout(stallTimer);
+    setTimeout(() => { removeAds(); ensureControlsExist(); }, 1500);
   }
-  setInterval(checkNavigation, 1000);
+  const navInterval = setInterval(checkNavigation, 1000);
+
+  window.addEventListener('pagehide', () => {
+    if (observer)             { observer.disconnect(); observer = null; }
+    clearInterval(navInterval);
+    if (videoEventController) { videoEventController.abort(); videoEventController = null; }
+    clearTimeout(stallTimer);
+    clearTimeout(hideTimer);
+  });
 
   // ─── Init ─────────────────────────────────────────────────────────────────
   removeAds();

@@ -1,23 +1,36 @@
-/* ── JudoTV Enhanced v2.0 — content styles ── */
+/* ── JudoTV Enhanced v2.1 — content styles ── */
 
-/* Controls bar — geïnjecteerd IN de video-wrapper */
+:root {
+  --judotv-accent:        #e8000d;
+  --judotv-warn:          #f59e0b;
+  --judotv-info:          #3b82f6;
+  --judotv-neutral:       #6b7280;
+  --judotv-btn-bg:        rgba(255,255,255,0.13);
+  --judotv-btn-bg-hover:  rgba(255,255,255,0.26);
+  --judotv-btn-border:    rgba(255,255,255,0.18);
+  --judotv-overlay-grad:  linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+  --judotv-toast-bg:      rgba(30,30,30,0.93);
+  --judotv-z-controls:    9998;
+  --judotv-z-toast:       99999;
+}
+
+/* Controls bar */
 #judotv-ext-v2-controls {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  z-index: 9998;
+  z-index: var(--judotv-z-controls);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 10px 14px;
-  background: linear-gradient(to top, rgba(0,0,0,0.82) 0%, transparent 100%);
-  pointer-events: none;           /* klikken gaan door als bar verborgen is */
-
-  /* Verborgen standaard */
+  background: var(--judotv-overlay-grad);
+  pointer-events: none;
   opacity: 0;
   transform: translateY(6px);
   transition: opacity 0.22s ease, transform 0.22s ease;
+  flex-wrap: wrap;
 }
 
 #judotv-ext-v2-controls.judotv-controls--visible {
@@ -31,29 +44,31 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 11px;
-  border: none;
+  padding: 5px 10px;
+  border: 1px solid var(--judotv-btn-border);
   border-radius: 20px;
-  background: rgba(255,255,255,0.13);
+  background: var(--judotv-btn-bg);
   color: #fff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   font-family: system-ui, sans-serif;
   cursor: pointer;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255,255,255,0.18);
   transition: background 0.15s ease, transform 0.1s ease;
   white-space: nowrap;
 }
 
-.judotv-btn:hover {
-  background: rgba(255,255,255,0.26);
-  transform: scale(1.05);
+@supports not (backdrop-filter: blur(1px)) {
+  .judotv-btn { background: rgba(20,20,20,0.85); }
 }
 
-.judotv-btn:active {
-  transform: scale(0.97);
+.judotv-btn:hover  { background: var(--judotv-btn-bg-hover); transform: scale(1.07); }
+.judotv-btn:active { transform: scale(0.96); }
+
+.judotv-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 /* Status badge */
@@ -63,30 +78,30 @@
   font-family: system-ui, sans-serif;
   padding: 3px 8px;
   border-radius: 12px;
-  margin-right: 4px;
+  margin-right: 2px;
   letter-spacing: 0.3px;
 }
 
-.status--live         { background: #e8000d; color: #fff; }
-.status--stalled      { background: #f59e0b; color: #000; }
-.status--reconnecting { background: #3b82f6; color: #fff; }
-.status--error        { background: #6b7280; color: #fff; }
+.status--live         { background: var(--judotv-accent); color: #fff; }
+.status--stalled      { background: var(--judotv-warn);   color: #000; }
+.status--reconnecting { background: var(--judotv-info);   color: #fff; }
+.status--error        { background: var(--judotv-neutral); color: #fff; }
 .status--paused       { background: #374151; color: #9ca3af; }
 
-/* ── Toast notificaties ── */
+/* Toast notificaties */
 .judotv-toast {
   position: fixed;
-  bottom: 24px;
+  bottom: 80px;
   left: 50%;
-  transform: translateX(-50%) translateY(12px);
-  z-index: 99999;
+  transform: translateX(-50%) translateY(10px);
+  z-index: var(--judotv-z-toast);
   padding: 9px 18px;
   border-radius: 24px;
   font-size: 14px;
   font-weight: 600;
   font-family: system-ui, sans-serif;
   color: #fff;
-  background: rgba(30,30,30,0.92);
+  background: var(--judotv-toast-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255,255,255,0.12);
@@ -95,13 +110,16 @@
   transition: opacity 0.25s ease, transform 0.25s ease;
   pointer-events: none;
   white-space: nowrap;
+  max-width: 90vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.judotv-toast--visible {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
+@supports not (backdrop-filter: blur(1px)) {
+  .judotv-toast { background: rgba(20,20,20,0.95); }
 }
 
-.judotv-toast--warn    { background: rgba(180, 120, 0, 0.92); }
-.judotv-toast--error   { background: rgba(180, 30, 30, 0.92); }
-.judotv-toast--success { background: rgba(22, 130, 80, 0.92); }
+.judotv-toast--visible  { opacity: 1; transform: translateX(-50%) translateY(0); }
+.judotv-toast--warn     { background: rgba(160, 100, 0, 0.93); }
+.judotv-toast--error    { background: rgba(160, 30, 30, 0.93); }
+.judotv-toast--success  { background: rgba(22, 120, 70, 0.93); }
