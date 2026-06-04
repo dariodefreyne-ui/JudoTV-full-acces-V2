@@ -2,37 +2,44 @@
   'use strict';
 
   // ─── Constants ────────────────────────────────────────────────────────────
-  const EXT_ID         = 'judotv-ext-v2';
-  const CONTROLS_ID    = `${EXT_ID}-controls`;
-  const TOAST_ID       = `${EXT_ID}-toast`;
-  const MAX_RECONNECTS = 4;
-  const HIDE_DELAY_MS  = 3000;
+  const EXT_ID           = 'judotv-ext-v2';
+  const CONTROLS_ID      = `${EXT_ID}-controls`;
+  const TOAST_ID         = `${EXT_ID}-toast`;
+  const MAX_RECONNECTS   = 4;
+  const HIDE_DELAY_MS    = 3000;
   const STALL_TIMEOUT_MS = 8000;
 
-  // Alle bekende ad-selectors — uitbreidbaar
   const AD_SELECTORS = [
-    // Originele v1 selectors
     '.flex.items-center.justify-center.top-0.left-0.right-0.absolute.z-10.w-5\\/6',
     '.flex.items-center.justify-center.right-0.absolute.z-10.w-1\\/4.bottom-\\[30\\%\\]',
-    // Generieke overlay-patronen
     '[class*="ad-overlay"]',
     '[class*="advertisement"]',
     '[id*="ad-container"]',
     '[id*="sponsor-overlay"]',
     'div[style*="z-index: 9999"]:not(#judotv-ext-v2-controls)',
-    // Iframes die niet van judotv.com komen (ad-iframes)
-    'iframe:not([src*="judotv.com"]):not([src*="vimeo"]):not([src*="youtube"])',
   ];
 
   // ─── State ────────────────────────────────────────────────────────────────
-  let reconnectCount  = 0;
-  let stallTimer      = null;
-  let hideTimer       = null;
-  let autoReconnect   = true;
-  let observerActive  = false;
-  let rafPending      = false;
+  const STATUS_BADGE_MAP = {
+    live:         { text: '● LIVE',       cls: 'status--live'         },
+    stalled:      { text: '⏸ Buffering',  cls: 'status--stalled'      },
+    reconnecting: { text: '🔄 Herstel',   cls: 'status--reconnecting' },
+    error:        { text: '✕ Fout',        cls: 'status--error'        },
+    paused:       { text: '⏸ Gepauzeerd', cls: 'status--paused'       },
+  };
 
-  // ─── Settings (via chrome.storage) ───────────────────────────────────────
+  let reconnectCount        = 0;
+  let stallTimer            = null;
+  let hideTimer             = null;
+  let autoReconnect         = true;
+  let observer              = null;
+  let rafPending            = false;
+  let navInterval           = null;
+  let boundVideo            = null;
+  let videoEventController  = null;
+  let wrapperController     = null;
+
+  // ─── Settings ─────────────────────────────────────────────────────────────
   function loadSettings() {
     chrome.storage.sync.get({ autoReconnect: true }, (result) => {
       autoReconnect = result.autoReconnect;
@@ -57,22 +64,26 @@
 
   // ─── Ad removal ───────────────────────────────────────────────────────────
   function removeAds() {
-    let removed = 0;
     AD_SELECTORS.forEach(selector => {
       try {
         document.querySelectorAll(selector).forEach(el => {
-          // Nooit onze eigen extensie-elementen verwijderen
           if (el.id && el.id.startsWith(EXT_ID)) return;
           if (el.closest(`#${CONTROLS_ID}`)) return;
           el.remove();
-          removed++;
         });
-      } catch (_) { /* ongeldige selector — overslaan */ }
+      } catch (_) {}
     });
-    return removed;
+
+    // Ad-iframes: case-insensitive check op src
+    document.querySelectorAll('iframe[src]').forEach(el => {
+      const src = el.getAttribute('src').toLowerCase();
+      if (!src.includes('judotv.com') && !src.includes('vimeo') && !src.includes('youtube')) {
+        el.remove();
+      }
+    });
   }
 
-  // ─── Throttled MutationObserver via rAF ──────────────────────────────────
+  // ─── Throttled MutationObserver ───────────────────────────────────────────
   function onDOMMutation() {
     if (rafPending) return;
     rafPending = true;
@@ -84,22 +95,19 @@
   }
 
   function startObserver() {
-    if (observerActive) return;
-    const observer = new MutationObserver(onDOMMutation);
+    if (observer) return;
+    observer = new MutationObserver(onDOMMutation);
     observer.observe(document.body, { childList: true, subtree: true });
-    observerActive = true;
   }
 
   // ─── Auto-reconnect ───────────────────────────────────────────────────────
-  function scheduleReconnect(video, reason) {
+  function scheduleReconnect(video) {
     if (!autoReconnect) return;
     clearTimeout(stallTimer);
-    stallTimer = setTimeout(() => {
-      attemptReconnect(video, reason);
-    }, STALL_TIMEOUT_MS);
+    stallTimer = setTimeout(() => attemptReconnect(video), STALL_TIMEOUT_MS);
   }
 
-  function attemptReconnect(video, reason) {
+  function attemptReconnect(video) {
     if (reconnectCount >= MAX_RECONNECTS) {
       showToast('⚠️ Stream kon niet hersteld worden. Herlaad de pagina.', 'error', 8000);
       updateStatusBadge('error');
@@ -109,10 +117,15 @@
     showToast(`🔄 Stream herstellen... (poging ${reconnectCount}/${MAX_RECONNECTS})`, 'warn', 4000);
     updateStatusBadge('reconnecting');
 
-    const currentTime = video.currentTime;
-    video.load();
+    const savedTime = video.currentTime;
+    try {
+      video.load();
+    } catch (_) {
+      showToast('⚠️ Herstel mislukt. Herlaad de pagina.', 'error', 6000);
+      return;
+    }
     video.addEventListener('canplay', () => {
-      video.currentTime = currentTime;
+      video.currentTime = savedTime;
       video.play().catch(() => {});
       reconnectCount = 0;
       updateStatusBadge('live');
@@ -120,46 +133,42 @@
     }, { once: true });
   }
 
+  // Bind video events met AbortController zodat ze correct opgeruimd worden
   function bindVideoEvents(video) {
-    video.addEventListener('stalled', () => {
-      updateStatusBadge('stalled');
-      scheduleReconnect(video, 'stalled');
-    });
-    video.addEventListener('waiting', () => {
-      updateStatusBadge('stalled');
-      scheduleReconnect(video, 'waiting');
+    if (video === boundVideo) return;
+    if (videoEventController) videoEventController.abort();
+    videoEventController = new AbortController();
+    const { signal } = videoEventController;
+    boundVideo = video;
+
+    ['stalled', 'waiting'].forEach(evt => {
+      video.addEventListener(evt, () => {
+        updateStatusBadge('stalled');
+        scheduleReconnect(video);
+      }, { signal });
     });
     video.addEventListener('error', () => {
       updateStatusBadge('error');
-      scheduleReconnect(video, 'error');
-    });
+      scheduleReconnect(video);
+    }, { signal });
     video.addEventListener('playing', () => {
       clearTimeout(stallTimer);
       reconnectCount = 0;
       updateStatusBadge('live');
-    });
+    }, { signal });
     video.addEventListener('pause', () => {
       clearTimeout(stallTimer);
       updateStatusBadge('paused');
-    });
+    }, { signal });
   }
 
-  // ─── Status badge (in controls bar) ──────────────────────────────────────
+  // ─── Status badge ─────────────────────────────────────────────────────────
   function updateStatusBadge(state) {
     const badge = document.getElementById(`${EXT_ID}-status`);
     if (!badge) return;
-    const map = {
-      live:         { text: '● LIVE',      cls: 'status--live'        },
-      stalled:      { text: '⏸ Buffering', cls: 'status--stalled'     },
-      reconnecting: { text: '🔄 Herstel',  cls: 'status--reconnecting'},
-      error:        { text: '✕ Fout',       cls: 'status--error'       },
-      paused:       { text: '⏸ Gepauzeerd',cls: 'status--paused'      },
-    };
-    const s = map[state] || map.live;
+    const s = STATUS_BADGE_MAP[state] || STATUS_BADGE_MAP.live;
     badge.textContent = s.text;
     badge.className   = `judotv-status-badge ${s.cls}`;
-
-    // Stuur ook status naar popup
     chrome.storage.session?.set?.({ streamStatus: state });
   }
 
@@ -187,7 +196,6 @@
   }
 
   function doFullscreen() {
-    // Fullscreen op de video-wrapper zodat onze controls mee in fullscreen gaan
     const wrapper = document.getElementById(CONTROLS_ID)?.parentElement
                     || getVideo()?.closest('.relative.aspect-video')
                     || getVideo()?.parentElement;
@@ -196,9 +204,49 @@
     if (req) req.call(wrapper).catch(() => {});
   }
 
+  function doPiP() {
+    const v = getVideo();
+    if (!v) return;
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    } else {
+      v.requestPictureInPicture().catch(() => {
+        showToast('PiP niet ondersteund door deze browser', 'warn', 2500);
+      });
+    }
+  }
+
+  // ─── Toetsenbordsnelkoppelingen ───────────────────────────────────────────
+  function handleKeyboard(e) {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    const v = getVideo();
+    if (!v) return;
+    switch (e.code) {
+      case 'Space':
+        e.preventDefault();
+        if (v.paused) { v.play().catch(() => {}); showToast('▶ Afspelen', 'info', 1200); }
+        else          { v.pause();                 showToast('⏸ Gepauzeerd', 'info', 1200); }
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        doRewind(10);
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        doGoLive();
+        break;
+      case 'KeyF':
+        doFullscreen();
+        break;
+      case 'KeyP':
+        doPiP();
+        break;
+    }
+  }
+
   // ─── Controls injectie ────────────────────────────────────────────────────
   function ensureControlsExist() {
-    if (document.getElementById(CONTROLS_ID)) return; // al aanwezig
+    if (document.getElementById(CONTROLS_ID)) return;
 
     const videoEl = getVideo();
     if (!videoEl) return;
@@ -208,101 +256,106 @@
                     || videoEl.parentElement;
     if (!wrapper) return;
 
-    // Wrapper moet position:relative hebben
-    const wStyle = getComputedStyle(wrapper);
-    if (wStyle.position === 'static') wrapper.style.position = 'relative';
+    if (getComputedStyle(wrapper).position === 'static') {
+      wrapper.style.position = 'relative';
+    }
 
-    // ── Container ──
     const bar = document.createElement('div');
     bar.id = CONTROLS_ID;
     bar.className = 'judotv-controls';
 
-    // ── Status badge ──
     const badge = document.createElement('span');
     badge.id = `${EXT_ID}-status`;
     badge.className = 'judotv-status-badge status--live';
     badge.textContent = '● LIVE';
 
-    // ── Knoppen ──
     const btns = [
-      { label: '⏪ 5s',        title: '5 seconden terug',   action: () => doRewind(5)   },
-      { label: '⏪ 10s',       title: '10 seconden terug',  action: () => doRewind(10)  },
-      { label: '⏪ 30s',       title: '30 seconden terug',  action: () => doRewind(30)  },
-      { label: '⏩ LIVE',      title: 'Ga naar live',       action: doGoLive            },
-      { label: '⛶ Volledig',  title: 'Volledig scherm',    action: doFullscreen        },
+      { label: '⏪ 5s',    title: '5 seconden terug (←)',    action: () => doRewind(5)  },
+      { label: '⏪ 10s',   title: '10 seconden terug (←)',   action: () => doRewind(10) },
+      { label: '⏪ 30s',   title: '30 seconden terug',        action: () => doRewind(30) },
+      { label: '⏩ LIVE',  title: 'Ga naar live (→)',         action: doGoLive           },
+      { label: '⧉ PiP',   title: 'Picture-in-Picture (P)',   action: doPiP              },
+      { label: '⛶ Scherm', title: 'Volledig scherm (F)',     action: doFullscreen       },
     ];
 
     bar.appendChild(badge);
-
     btns.forEach(({ label, title, action }) => {
       const btn = document.createElement('button');
-      btn.className   = 'judotv-btn';
-      btn.textContent = label;
-      btn.title       = title;
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        action();
-      });
+      btn.className      = 'judotv-btn';
+      btn.textContent    = label;
+      btn.title          = title;
+      btn.setAttribute('aria-label', title);
+      btn.addEventListener('click', (e) => { e.stopPropagation(); action(); });
       bar.appendChild(btn);
     });
 
     wrapper.appendChild(bar);
 
-    // ── Mouse-interactie: toon/verberg ──
+    if (wrapperController) wrapperController.abort();
+    wrapperController = new AbortController();
+    const { signal: wSignal } = wrapperController;
+
     function showControls() {
       bar.classList.add('judotv-controls--visible');
       clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        bar.classList.remove('judotv-controls--visible');
-      }, HIDE_DELAY_MS);
+      hideTimer = setTimeout(() => bar.classList.remove('judotv-controls--visible'), HIDE_DELAY_MS);
     }
-
-    wrapper.addEventListener('mousemove', showControls);
-    wrapper.addEventListener('mouseenter', showControls);
-    wrapper.addEventListener('mouseleave', () => {
+    function hideControls() {
       clearTimeout(hideTimer);
       bar.classList.remove('judotv-controls--visible');
-    });
-    // Knoppen zelf: timer resetten bij hover
-    bar.addEventListener('mouseenter', () => {
-      clearTimeout(hideTimer);
-      bar.classList.add('judotv-controls--visible');
-    });
+    }
 
-    // Video events binden
+    wrapper.addEventListener('mousemove',  showControls, { signal: wSignal });
+    wrapper.addEventListener('mouseenter', showControls, { signal: wSignal });
+    wrapper.addEventListener('touchstart', showControls, { passive: true, signal: wSignal });
+    wrapper.addEventListener('mouseleave', hideControls, { signal: wSignal });
+    bar.addEventListener('mouseenter', showControls, { signal: wSignal });
+
     bindVideoEvents(videoEl);
     updateStatusBadge('live');
   }
 
-  // ─── SPA-navigatie opvangen ───────────────────────────────────────────────
+  // ─── SPA-navigatie ────────────────────────────────────────────────────────
   let lastUrl = location.href;
-  function checkNavigation() {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      // Wacht even tot nieuwe DOM geladen is
-      setTimeout(() => {
-        removeAds();
-        ensureControlsExist();
-      }, 1500);
-    }
+  function onNavigate() {
+    if (location.href === lastUrl) return;
+    lastUrl = location.href;
+    document.getElementById(CONTROLS_ID)?.remove();
+    boundVideo = null;
+    if (videoEventController) { videoEventController.abort(); videoEventController = null; }
+    if (wrapperController)    { wrapperController.abort();    wrapperController = null; }
+    reconnectCount = 0;
+    clearTimeout(stallTimer);
+    setTimeout(() => { removeAds(); ensureControlsExist(); }, 1500);
   }
-  setInterval(checkNavigation, 1000);
+
+  // ─── Cleanup bij pagina-verlating ────────────────────────────────────────
+  window.addEventListener('pagehide', () => {
+    if (observer)             { observer.disconnect();        observer = null; }
+    if (navInterval)          { clearInterval(navInterval);   navInterval = null; }
+    if (videoEventController) { videoEventController.abort(); videoEventController = null; }
+    if (wrapperController)    { wrapperController.abort();    wrapperController = null; }
+    clearTimeout(stallTimer);
+    clearTimeout(hideTimer);
+  });
 
   // ─── Berichten van popup ──────────────────────────────────────────────────
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === 'rewind')      doRewind(msg.seconds);
-    if (msg.action === 'goLive')      doGoLive();
-    if (msg.action === 'fullscreen')  doFullscreen();
+    if (msg.action === 'rewind')      { doRewind(msg.seconds); return; }
+    if (msg.action === 'goLive')      { doGoLive();            return; }
+    if (msg.action === 'fullscreen')  { doFullscreen();        return; }
+    if (msg.action === 'pip')         { doPiP();               return; }
     if (msg.action === 'setAutoReconnect') {
       autoReconnect = msg.value;
       chrome.storage.sync.set({ autoReconnect: msg.value });
+      return;
     }
     if (msg.action === 'getStatus') {
       const v = getVideo();
       return Promise.resolve({
-        hasVideo:      !!v,
-        paused:        v ? v.paused : null,
-        currentTime:   v ? Math.floor(v.currentTime) : null,
+        hasVideo:     !!v,
+        paused:       v ? v.paused : null,
+        currentTime:  v ? Math.floor(v.currentTime) : null,
         autoReconnect,
       });
     }
@@ -314,6 +367,11 @@
     removeAds();
     ensureControlsExist();
     startObserver();
+    document.addEventListener('keydown', handleKeyboard);
+    // popstate covers browser back/forward; interval catches history.pushState SPAs
+    window.addEventListener('popstate',   onNavigate);
+    window.addEventListener('hashchange', onNavigate);
+    navInterval = setInterval(onNavigate, 1000);
   }
 
   if (document.readyState === 'loading') {

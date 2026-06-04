@@ -13,37 +13,39 @@
       <img src="icon.png" alt="JudoTV" class="popup__logo">
       <div>
         <h1 class="popup__title">JudoTV Enhanced</h1>
-        <span id="stream-status" class="popup__status">Laden...</span>
+        <span id="stream-status" class="popup__status" role="status" aria-live="polite">Laden...</span>
       </div>
     </header>
 
     <section class="popup__section">
       <p class="popup__label">Terugspoelen</p>
       <div class="popup__btnrow">
-        <button class="popup__btn" data-action="rewind" data-seconds="5">⏪ 5s</button>
-        <button class="popup__btn" data-action="rewind" data-seconds="10">⏪ 10s</button>
-        <button class="popup__btn" data-action="rewind" data-seconds="30">⏪ 30s</button>
+        <button class="popup__btn" data-action="rewind" data-seconds="5"  aria-label="5 seconden terugspoelen">⏪ 5s</button>
+        <button class="popup__btn" data-action="rewind" data-seconds="10" aria-label="10 seconden terugspoelen">⏪ 10s</button>
+        <button class="popup__btn" data-action="rewind" data-seconds="30" aria-label="30 seconden terugspoelen">⏪ 30s</button>
       </div>
     </section>
 
     <section class="popup__section">
       <p class="popup__label">Speler</p>
       <div class="popup__btnrow">
-        <button class="popup__btn popup__btn--accent" data-action="goLive">⏩ Naar LIVE</button>
-        <button class="popup__btn" data-action="fullscreen">⛶ Volledig</button>
+        <button class="popup__btn popup__btn--accent" data-action="goLive"    aria-label="Ga naar live stream">⏩ Naar LIVE</button>
+        <button class="popup__btn"                    data-action="pip"       aria-label="Picture-in-Picture">⧉ PiP</button>
+        <button class="popup__btn"                    data-action="fullscreen" aria-label="Volledig scherm">⛶ Scherm</button>
       </div>
     </section>
 
     <section class="popup__section popup__section--toggle">
-      <span class="popup__label">Auto-herverbinden bij uitval</span>
-      <label class="toggle">
+      <label class="popup__label" for="auto-reconnect-toggle">Auto-herverbinden bij uitval</label>
+      <label class="toggle" aria-label="Auto-herverbinden aan of uit">
         <input type="checkbox" id="auto-reconnect-toggle" checked>
         <span class="toggle__slider"></span>
       </label>
     </section>
 
     <footer class="popup__footer">
-      v2.0 · <a href="https://judotv.com" target="_blank">judotv.com</a>
+      <span class="popup__shortcuts">Sneltoetsen: Spatie · ← · → · F · P</span>
+      v2.1 · <a href="https://judotv.com" target="_blank" rel="noopener noreferrer">judotv.com</a>
     </footer>
 
   </div>
