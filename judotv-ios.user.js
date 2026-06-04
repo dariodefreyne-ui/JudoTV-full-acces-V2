@@ -127,14 +127,23 @@
     'div[style*="z-index: 9999"]:not(#judotv-ext-v2-controls)',
   ];
 
+  const STATUS_BADGE_MAP = {
+    live:         { text: '● LIVE',       cls: 'status--live'         },
+    stalled:      { text: '⏸ Buffering',  cls: 'status--stalled'      },
+    reconnecting: { text: '🔄 Herstel',   cls: 'status--reconnecting' },
+    error:        { text: '✕ Fout',        cls: 'status--error'        },
+    paused:       { text: '⏸ Gepauzeerd', cls: 'status--paused'       },
+  };
+
   // ─── State ────────────────────────────────────────────────────────────────
-  let reconnectCount       = 0;
-  let stallTimer           = null;
-  let hideTimer            = null;
-  let observer             = null;
-  let rafPending           = false;
-  let boundVideo           = null;
-  let videoEventController = null;
+  let reconnectCount        = 0;
+  let stallTimer            = null;
+  let hideTimer             = null;
+  let observer              = null;
+  let rafPending            = false;
+  let boundVideo            = null;
+  let videoEventController  = null;
+  let wrapperController     = null;
 
   // Auto-reconnect instelling via GM_getValue/GM_setValue (of standaard true)
   let autoReconnect = (typeof GM_getValue !== 'undefined')
@@ -194,12 +203,10 @@
   }
 
   // ─── Auto-reconnect ───────────────────────────────────────────────────────
-  function scheduleReconnect(video, reason) {
+  function scheduleReconnect(video) {
     if (!autoReconnect) return;
     clearTimeout(stallTimer);
-    stallTimer = setTimeout(() => {
-      attemptReconnect(video, reason);
-    }, STALL_TIMEOUT_MS);
+    stallTimer = setTimeout(() => attemptReconnect(video), STALL_TIMEOUT_MS);
   }
 
   function attemptReconnect(video) {
@@ -230,17 +237,15 @@
     const { signal } = videoEventController;
     boundVideo = video;
 
-    video.addEventListener('stalled', () => {
-      updateStatusBadge('stalled');
-      scheduleReconnect(video, 'stalled');
-    }, { signal });
-    video.addEventListener('waiting', () => {
-      updateStatusBadge('stalled');
-      scheduleReconnect(video, 'waiting');
-    }, { signal });
+    ['stalled', 'waiting'].forEach(evt => {
+      video.addEventListener(evt, () => {
+        updateStatusBadge('stalled');
+        scheduleReconnect(video);
+      }, { signal });
+    });
     video.addEventListener('error', () => {
       updateStatusBadge('error');
-      scheduleReconnect(video, 'error');
+      scheduleReconnect(video);
     }, { signal });
     video.addEventListener('playing', () => {
       clearTimeout(stallTimer);
@@ -257,14 +262,7 @@
   function updateStatusBadge(state) {
     const badge = document.getElementById(`${EXT_ID}-status`);
     if (!badge) return;
-    const map = {
-      live:         { text: '● LIVE',       cls: 'status--live'         },
-      stalled:      { text: '⏸ Buffering',  cls: 'status--stalled'      },
-      reconnecting: { text: '🔄 Herstel',   cls: 'status--reconnecting' },
-      error:        { text: '✕ Fout',        cls: 'status--error'        },
-      paused:       { text: '⏸ Gepauzeerd', cls: 'status--paused'       },
-    };
-    const s = map[state] || map.live;
+    const s = STATUS_BADGE_MAP[state] || STATUS_BADGE_MAP.live;
     badge.textContent = s.text;
     badge.className   = `judotv-status-badge ${s.cls}`;
   }
@@ -362,29 +360,25 @@
 
     wrapper.appendChild(bar);
 
+    if (wrapperController) wrapperController.abort();
+    wrapperController = new AbortController();
+    const { signal: wSignal } = wrapperController;
+
     function showControls() {
       bar.classList.add('judotv-controls--visible');
       clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        bar.classList.remove('judotv-controls--visible');
-      }, HIDE_DELAY_MS);
+      hideTimer = setTimeout(() => bar.classList.remove('judotv-controls--visible'), HIDE_DELAY_MS);
     }
-
-    wrapper.addEventListener('mousemove', showControls);
-    wrapper.addEventListener('mouseenter', showControls);
-    wrapper.addEventListener('mouseleave', () => {
+    function hideControls() {
       clearTimeout(hideTimer);
       bar.classList.remove('judotv-controls--visible');
-    });
-    bar.addEventListener('mouseenter', () => {
-      clearTimeout(hideTimer);
-      bar.classList.add('judotv-controls--visible');
-    });
+    }
 
-    // Touch-ondersteuning voor iOS
-    wrapper.addEventListener('touchstart', () => {
-      showControls();
-    }, { passive: true });
+    wrapper.addEventListener('mousemove',  showControls, { signal: wSignal });
+    wrapper.addEventListener('mouseenter', showControls, { signal: wSignal });
+    wrapper.addEventListener('touchstart', showControls, { passive: true, signal: wSignal });
+    wrapper.addEventListener('mouseleave', hideControls, { signal: wSignal });
+    bar.addEventListener('mouseenter', showControls, { signal: wSignal });
 
     bindVideoEvents(videoEl);
     updateStatusBadge('live');
@@ -392,22 +386,26 @@
 
   // ─── SPA-navigatie opvangen ───────────────────────────────────────────────
   let lastUrl = location.href;
-  function checkNavigation() {
+  function onNavigate() {
     if (location.href === lastUrl) return;
     lastUrl = location.href;
     document.getElementById(CONTROLS_ID)?.remove();
     boundVideo = null;
     if (videoEventController) { videoEventController.abort(); videoEventController = null; }
+    if (wrapperController)    { wrapperController.abort();    wrapperController = null; }
     reconnectCount = 0;
     clearTimeout(stallTimer);
     setTimeout(() => { removeAds(); ensureControlsExist(); }, 1500);
   }
-  const navInterval = setInterval(checkNavigation, 1000);
+  const navInterval = setInterval(onNavigate, 1000);
+  window.addEventListener('popstate',   onNavigate);
+  window.addEventListener('hashchange', onNavigate);
 
   window.addEventListener('pagehide', () => {
-    if (observer)             { observer.disconnect(); observer = null; }
+    if (observer)             { observer.disconnect();        observer = null; }
     clearInterval(navInterval);
     if (videoEventController) { videoEventController.abort(); videoEventController = null; }
+    if (wrapperController)    { wrapperController.abort();    wrapperController = null; }
     clearTimeout(stallTimer);
     clearTimeout(hideTimer);
   });
