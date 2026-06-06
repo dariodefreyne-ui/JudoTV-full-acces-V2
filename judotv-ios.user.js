@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JudoTV Enhanced (iOS)
 // @namespace    https://judotv.com
-// @version      2.3
+// @version      2.4
 // @description  Advertenties verwijderen, videobediening en auto-reconnect op judotv.com
 // @author       JudoTV Enhanced
 // @match        https://judotv.com/*
@@ -136,6 +136,21 @@
     '[class*="modal-overlay"]',
     '[class*="popup-overlay"]',
     '[id*="modal-overlay"]',
+    // Google One Tap / inlog-prompt (schuift van boven naar beneden)
+    '#credential_picker_container',
+    '#g_id_onload',
+    '[id*="google-one-tap"]',
+    '[class*="google-one-tap"]',
+    '[class*="g_id_signin"]',
+    // App-download / smartbanners
+    '[class*="smartbanner"]',
+    '[id*="smartbanner"]',
+    '.branch-banner-container',
+    '[class*="app-banner"]',
+    '[id*="app-banner"]',
+    '[class*="app-install"]',
+    '[class*="open-in-app"]',
+    '[class*="download-app"]',
   ];
 
   const STATUS_BADGE_MAP = {
@@ -191,9 +206,12 @@
     });
     document.querySelectorAll('iframe[src]').forEach(el => {
       const src = el.getAttribute('src').toLowerCase();
-      if (!src.includes('judotv.com') && !src.includes('vimeo') && !src.includes('youtube')) {
-        el.remove();
-      }
+      const allowed = src.includes('judotv.com') || src.includes('vimeo') || src.includes('youtube');
+      if (!allowed) el.remove();
+    });
+    // Google One Tap gebruikt soms een frameless container zonder iframe
+    document.querySelectorAll('[id^="g_"][style*="position"]').forEach(el => {
+      if (!el.id.startsWith(EXT_ID)) el.remove();
     });
   }
 
