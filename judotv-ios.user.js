@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JudoTV Enhanced (iOS)
 // @namespace    https://judotv.com
-// @version      2.2
+// @version      2.3
 // @description  Advertenties verwijderen, videobediening en auto-reconnect op judotv.com
 // @author       JudoTV Enhanced
 // @match        https://judotv.com/*
@@ -303,9 +303,17 @@
   }
 
   function doFullscreen() {
+    const v = getVideo();
+    if (!v) return;
+    // iOS Safari ondersteunt geen requestFullscreen op div-elementen;
+    // webkitEnterFullscreen werkt alleen op <video> zelf
+    if (v.webkitEnterFullscreen) {
+      v.webkitEnterFullscreen();
+      return;
+    }
     const wrapper = document.getElementById(CONTROLS_ID)?.parentElement
-                    || getVideo()?.closest('.relative.aspect-video')
-                    || getVideo()?.parentElement;
+                    || v.closest('.relative.aspect-video')
+                    || v.parentElement;
     if (!wrapper) return;
     const req = wrapper.requestFullscreen || wrapper.webkitRequestFullscreen;
     if (req) req.call(wrapper).catch(() => {});
