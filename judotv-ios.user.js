@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JudoTV Enhanced (iOS)
 // @namespace    https://judotv.com
-// @version      2.1
+// @version      2.2
 // @description  Advertenties verwijderen, videobediening en auto-reconnect op judotv.com
 // @author       JudoTV Enhanced
 // @match        https://judotv.com/*
@@ -25,9 +25,10 @@
       z-index: 9998;
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: linear-gradient(to top, rgba(0,0,0,0.82) 0%, transparent 100%);
+      flex-wrap: wrap;
+      gap: 5px;
+      padding: 8px 10px;
+      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
       pointer-events: none;
       opacity: 0;
       transform: translateY(6px);
@@ -41,31 +42,27 @@
     .judotv-btn {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 5px 11px;
-      border: none;
+      padding: 4px 9px;
       border-radius: 20px;
-      background: rgba(255,255,255,0.13);
+      background: rgba(255,255,255,0.15);
       color: #fff;
-      font-size: 13px;
-      font-weight: 600;
-      font-family: system-ui, sans-serif;
-      cursor: pointer;
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      border: 1px solid rgba(255,255,255,0.18);
-      transition: background 0.15s ease, transform 0.1s ease;
-      white-space: nowrap;
-    }
-    .judotv-btn:hover { background: rgba(255,255,255,0.26); transform: scale(1.05); }
-    .judotv-btn:active { transform: scale(0.97); }
-    .judotv-status-badge {
       font-size: 11px;
       font-weight: 700;
       font-family: system-ui, sans-serif;
-      padding: 3px 8px;
-      border-radius: 12px;
-      margin-right: 4px;
+      cursor: pointer;
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.22);
+      transition: background 0.15s ease;
+      white-space: nowrap;
+    }
+    .judotv-btn:active { background: rgba(255,255,255,0.35); }
+    .judotv-status-badge {
+      font-size: 10px;
+      font-weight: 700;
+      font-family: system-ui, sans-serif;
+      padding: 2px 7px;
+      border-radius: 10px;
       letter-spacing: 0.3px;
     }
     .status--live         { background: #e8000d; color: #fff; }
@@ -75,30 +72,31 @@
     .status--paused       { background: #374151; color: #9ca3af; }
     .judotv-toast {
       position: fixed;
-      bottom: 24px;
+      bottom: 80px;
       left: 50%;
-      transform: translateX(-50%) translateY(12px);
+      transform: translateX(-50%) translateY(10px);
       z-index: 99999;
-      padding: 9px 18px;
-      border-radius: 24px;
-      font-size: 14px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 13px;
       font-weight: 600;
       font-family: system-ui, sans-serif;
       color: #fff;
-      background: rgba(30,30,30,0.92);
-      backdrop-filter: blur(8px);
+      background: rgba(20,20,20,0.93);
       -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
       border: 1px solid rgba(255,255,255,0.12);
       box-shadow: 0 4px 20px rgba(0,0,0,0.4);
       opacity: 0;
       transition: opacity 0.25s ease, transform 0.25s ease;
       pointer-events: none;
       white-space: nowrap;
+      max-width: 88vw;
     }
     .judotv-toast--visible  { opacity: 1; transform: translateX(-50%) translateY(0); }
-    .judotv-toast--warn     { background: rgba(180, 120, 0, 0.92); }
-    .judotv-toast--error    { background: rgba(180, 30, 30, 0.92); }
-    .judotv-toast--success  { background: rgba(22, 130, 80, 0.92); }
+    .judotv-toast--warn     { background: rgba(160,100,0,0.93); }
+    .judotv-toast--error    { background: rgba(160,30,30,0.93); }
+    .judotv-toast--success  { background: rgba(20,110,60,0.93); }
   `;
 
   if (typeof GM_addStyle !== 'undefined') {
@@ -125,6 +123,19 @@
     '[id*="ad-container"]',
     '[id*="sponsor-overlay"]',
     'div[style*="z-index: 9999"]:not(#judotv-ext-v2-controls)',
+    // Cookie- en consent-banners
+    '[class*="cookie-banner"]',
+    '[class*="cookie-consent"]',
+    '[class*="cookie-notice"]',
+    '[id*="cookie-banner"]',
+    '[id*="cookie-consent"]',
+    '[class*="gdpr"]',
+    '[id*="gdpr"]',
+    '[class*="consent-popup"]',
+    // Generieke modals/popups
+    '[class*="modal-overlay"]',
+    '[class*="popup-overlay"]',
+    '[id*="modal-overlay"]',
   ];
 
   const STATUS_BADGE_MAP = {
@@ -144,6 +155,7 @@
   let boundVideo            = null;
   let videoEventController  = null;
   let wrapperController     = null;
+  let navInterval           = null;
 
   // Auto-reconnect instelling via GM_getValue/GM_setValue (of standaard true)
   let autoReconnect = (typeof GM_getValue !== 'undefined')
@@ -397,22 +409,40 @@
     clearTimeout(stallTimer);
     setTimeout(() => { removeAds(); ensureControlsExist(); }, 1500);
   }
-  const navInterval = setInterval(onNavigate, 1000);
   window.addEventListener('popstate',   onNavigate);
   window.addEventListener('hashchange', onNavigate);
 
   window.addEventListener('pagehide', () => {
     if (observer)             { observer.disconnect();        observer = null; }
-    clearInterval(navInterval);
+    if (navInterval)          { clearInterval(navInterval);   navInterval = null; }
     if (videoEventController) { videoEventController.abort(); videoEventController = null; }
     if (wrapperController)    { wrapperController.abort();    wrapperController = null; }
     clearTimeout(stallTimer);
     clearTimeout(hideTimer);
   });
 
+  // Herstel na terugkeer uit iOS bfcache (app-wisseling, terug-knop)
+  window.addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;
+    startObserver();
+    removeAds();
+    document.getElementById(CONTROLS_ID)?.remove();
+    boundVideo = null;
+    ensureControlsExist();
+    if (!navInterval) navInterval = setInterval(onNavigate, 1000);
+  });
+
+  // Herstel knoppen bij terugkeer in Safari zonder volledige pageshow
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      setTimeout(() => ensureControlsExist(), 400);
+    }
+  });
+
   // ─── Init ─────────────────────────────────────────────────────────────────
   removeAds();
   ensureControlsExist();
   startObserver();
+  navInterval = setInterval(onNavigate, 1000);
 
 })();
