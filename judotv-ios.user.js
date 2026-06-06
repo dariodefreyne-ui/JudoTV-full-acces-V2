@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JudoTV Enhanced (iOS)
 // @namespace    https://judotv.com
-// @version      2.4
+// @version      2.5
 // @description  Advertenties verwijderen, videobediening en auto-reconnect op judotv.com
 // @author       JudoTV Enhanced
 // @match        https://judotv.com/*
@@ -97,6 +97,33 @@
     .judotv-toast--warn     { background: rgba(160,100,0,0.93); }
     .judotv-toast--error    { background: rgba(160,30,30,0.93); }
     .judotv-toast--success  { background: rgba(20,110,60,0.93); }
+    #judotv-ext-v2-airplay {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 99998;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      background: rgba(10,10,10,0.93);
+      border-radius: 32px;
+      border: 1px solid rgba(255,255,255,0.18);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 4px 28px rgba(0,0,0,0.55);
+    }
+    .judotv-airplay-label {
+      font-size: 11px;
+      font-weight: 700;
+      font-family: system-ui, sans-serif;
+      color: #60a5fa;
+      padding-right: 4px;
+      border-right: 1px solid rgba(255,255,255,0.15);
+      margin-right: 2px;
+      white-space: nowrap;
+    }
   `;
 
   if (typeof GM_addStyle !== 'undefined') {
@@ -111,6 +138,7 @@
   const EXT_ID           = 'judotv-ext-v2';
   const CONTROLS_ID      = `${EXT_ID}-controls`;
   const TOAST_ID         = `${EXT_ID}-toast`;
+  const AIRPLAY_PANEL_ID = `${EXT_ID}-airplay`;
   const MAX_RECONNECTS   = 4;
   const HIDE_DELAY_MS    = 3000;
   const STALL_TIMEOUT_MS = 8000;
@@ -286,6 +314,13 @@
       clearTimeout(stallTimer);
       updateStatusBadge('paused');
     }, { signal });
+
+    // AirPlay detectie via Remote Playback API
+    if (video.remote) {
+      video.remote.onconnect    = () => { createAirPlayPanel(); showToast('📺 AirPlay verbonden', 'info', 2500); };
+      video.remote.ondisconnect = () => { removeAirPlayPanel(); showToast('📺 AirPlay verbroken', 'info', 2500); };
+      if (video.remote.state === 'connected') createAirPlayPanel();
+    }
   }
 
   // ─── Status badge ─────────────────────────────────────────────────────────
@@ -347,6 +382,40 @@
         showToast('PiP niet ondersteund door deze browser', 'warn', 2500);
       });
     }
+  }
+
+  // ─── AirPlay zwevend paneel ───────────────────────────────────────────────
+  function createAirPlayPanel() {
+    if (document.getElementById(AIRPLAY_PANEL_ID)) return;
+
+    const panel = document.createElement('div');
+    panel.id = AIRPLAY_PANEL_ID;
+
+    const label = document.createElement('span');
+    label.className = 'judotv-airplay-label';
+    label.textContent = '📺 AirPlay';
+    panel.appendChild(label);
+
+    const btns = [
+      { label: '⏪ 10s',  action: () => doRewind(10) },
+      { label: '⏪ 30s',  action: () => doRewind(30) },
+      { label: '⏯',       action: () => { const v = getVideo(); if (v) v.paused ? v.play().catch(() => {}) : v.pause(); } },
+      { label: '⏩ LIVE', action: doGoLive },
+    ];
+
+    btns.forEach(({ label, action }) => {
+      const btn = document.createElement('button');
+      btn.className   = 'judotv-btn';
+      btn.textContent = label;
+      btn.addEventListener('click', (e) => { e.stopPropagation(); action(); });
+      panel.appendChild(btn);
+    });
+
+    document.body.appendChild(panel);
+  }
+
+  function removeAirPlayPanel() {
+    document.getElementById(AIRPLAY_PANEL_ID)?.remove();
   }
 
   // ─── Controls injectie ────────────────────────────────────────────────────
@@ -428,6 +497,7 @@
     if (location.href === lastUrl) return;
     lastUrl = location.href;
     document.getElementById(CONTROLS_ID)?.remove();
+    removeAirPlayPanel();
     boundVideo = null;
     if (videoEventController) { videoEventController.abort(); videoEventController = null; }
     if (wrapperController)    { wrapperController.abort();    wrapperController = null; }
@@ -443,6 +513,7 @@
     if (navInterval)          { clearInterval(navInterval);   navInterval = null; }
     if (videoEventController) { videoEventController.abort(); videoEventController = null; }
     if (wrapperController)    { wrapperController.abort();    wrapperController = null; }
+    removeAirPlayPanel();
     clearTimeout(stallTimer);
     clearTimeout(hideTimer);
   });
